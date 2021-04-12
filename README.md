@@ -42,6 +42,7 @@
 ## 모델
 - PyTorch, Keras, Tensorflow, Scikit-learn, Numpy, ... 편하신대로 만드시면 됩니다.
 - NSML에 bind되는 infer(train_order_hist, train_price_hist, test_price_hist, prod_feat) 함수의 input 변수를 변경하지 마세요.
+- infer() 함수 내부는 변경하셔도 무관합니다.
 - infer() 함수는 주어진 input 4개를 활용하여 np.array [500, 7] 형태의 예측치를 return해야 합니다.
 
 ## 베이스라인
