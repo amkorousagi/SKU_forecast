@@ -4,12 +4,12 @@
 
 ## 학습 데이터
 - train/train_data/order_hist.npz
-  - CSR matrix with the shape (735, 1395407)
+  - CSR matrix with the shape [735, 1395407]
   - 스마트스토어의 1,395,407 개의 상품에 대한 735일간 일별(daily) 판매 기록을 학습데이터로 제공하고 있습니다. (모두 사용하지 않으셔도 무방합니다.)
   - 보안 문제로 인해 임의의 난수를 곱하여 제공했습니다.
 
 - train/train_data/price_hist.npz
-  - CSR matrix with the shape (735, 1395407)
+  - CSR matrix with the shape [735, 1395407]
   - 스마트스토어의 1,395,407 개의 상품에 대한 735일간 일별(daily) 평균 소비자 구매 가격 기록을 학습데이터로 제공하고 있습니다. (모두 사용하지 않으셔도 무방합니다.)
   - 보안 문제로 인해 임의의 난수를 곱하여 제공했습니다.
 
@@ -33,16 +33,16 @@
 - 총 12개의 테스트 데이터셋이 존재합니다.
 - 각 테스트 데이터셋의 ground truth는 랜덤으로 선택된 500개의 상품에 대한 1주일치 판매 기록입니다.
 - 과거 735일간의 기록, 과거 및 테스트기간 동안의 가격 정보, 상품정보를 활용할 수 있습니다.
-  - train_order_hist: np.array [500, 735]
-  - train_price_hist: np.array [500, 735]
-  - test_price_hist: np.array [500, 7]
+  - train_order_hist: np.array [735, 500]
+  - train_price_hist: np.array [735, 500]
+  - test_price_hist: np.array [7, 500]
   - prod_feat: np.array [500, 5]
 
 ## 모델
 - PyTorch, Keras, Tensorflow, Scikit-learn, Numpy, ... 편하신대로 만드시면 됩니다.
 - NSML에 bind되는 infer(train_order_hist, train_price_hist, test_price_hist, prod_feat) 함수의 input 변수를 변경하지 마세요.
 - infer() 함수 내부는 변경하셔도 무관합니다.
-- infer() 함수는 주어진 input 4개를 활용하여 np.array [500, 7] 형태의 예측치를 return해야 합니다.
+- infer() 함수는 주어진 input 4개를 활용하여 np.array [7, 500] 형태의 예측치를 return해야 합니다.
 
 ## 베이스라인
 - NSML 사용에 참고가 되길 바라며 PyTorch 기반으로 모델을 만들어서 제공드렸습니다.
