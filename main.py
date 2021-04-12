@@ -1,70 +1,57 @@
 
 import os
 import argparse
-import pickle as pkl
 import logging
 
 import torch
-import pandas as pd
 import numpy as np
+import pandas as pd
 import scipy.sparse as sp
 import nsml
 
-FORECAST_LEN = 7
-USECOLS = [
-    'npay_mrc_id', 'prod_catg_1depth_id', 'prod_catg_2depth_id',
-    'prod_catg_3depth_id', 'prod_catg_4depth_id'
-]
+from model import ForecastingModel
+from config import FORECAST_LEN, USECOLS
 
 
 def bind_model(model, device):
     def save(dir_name):
         params_fname = os.path.join(dir_name, 'params.pkl')
-        with open(params_fname, 'wb') as f:
-            pkl.dump(model.get_params(), f)
+        torch.save(model.state_dict(), params_fname)
 
     def load(dir_name):
         params_fname = os.path.join(dir_name, 'params.pkl')
-        with open(params_fname, 'rb') as f:
-            params = pkl.load(f)
-        model.load_params(params)
+        if device.type == 'cpu':
+            state = torch.load(params_fname, map_location={'cuda:0': 'cpu'})
+        else:
+            state = torch.load(params_fname)
+        model.load_state_dict(state)
 
-    def infer(train_order_hist, train_price_hist, test_price_hist, prod_feat):
+    def infer(
+            train_order_hist: np.ndarray, train_price_hist: np.ndarray,
+            test_price_hist: np.ndarray, prod_feat: np.ndarray
+    ):
         """
         :params
             train_order_hist (T_H, N): The order quantity of N=500 products for the last T_H=735 days.
             train_price_hist (T_H, N): The price of N=500 products for the last T_H=735 days.
             test_price_hist (T_F, N): The price of N=500 products for the next T_F=7 days.
             prod_feat (N, F): The F=5 categorical features of each product.
+        :return infer_result (T_F, N): The predicted order quantity of N=500 products for the next T_F=7 days.
         """
-        return model(train_order_hist, train_price_hist, test_price_hist, prod_feat)
+        model.eval()
+        hist_len = model.get_hist_len()
+
+        train_order_hist = torch.tensor(train_order_hist[-hist_len:].T, dtype=torch.float32, device=device)
+        train_price_hist = torch.tensor(train_price_hist[-hist_len:].T, dtype=torch.float32, device=device)
+        test_price_hist = torch.tensor(test_price_hist.T, dtype=torch.float32, device=device)
+        prod_feat = torch.tensor(prod_feat, dtype=torch.long, device=device)
+
+        prediction_tensor = model(train_order_hist, train_price_hist, test_price_hist, prod_feat)
+        infer_result = prediction_tensor.detach().cpu().numpy().T
+        return infer_result
 
     # DONOTCHANGE: They are reserved for nsml
     nsml.bind(save=save, load=load, infer=infer)
-
-
-class SimpleBaseline:
-    def __init__(self, num_weeks=1, level_trend=1.0):
-        self.params = {
-            'num_weeks': num_weeks,
-            'level_trend': level_trend
-        }
-
-    def train(self, order_hists, price_hists, prod_feat):
-        pass
-
-    def get_params(self):
-        return self.params
-
-    def load_params(self, params):
-        self.params = params
-
-    def __call__(self, train_order_hist, train_price_hist, test_price_hist, prod_feat):
-        nw = self.params['num_weeks']
-        lt = self.params['level_trend']
-        order_hist = train_order_hist[-FORECAST_LEN*nw:].reshape(nw, FORECAST_LEN, -1)
-        order_pred = np.mean(order_hist, axis=0) * lt
-        return order_pred
 
 
 def main():
@@ -82,13 +69,17 @@ def main():
     config = args.parse_args()
 
     # Settings
+    logging.getLogger().setLevel(logging.INFO)
     device = torch.device(
         'cuda' if torch.cuda.is_available() and config.device == 'cuda' else 'cpu'
     )
-    logging.getLogger().setLevel(logging.INFO)
 
-    # Bind model
-    model = SimpleBaseline()
+    # Build and bind model
+    logging.info('Build model...')
+    prod_num_embeddings = [215, 49, 393, 2058, 2504]  # np.max(prod_feat, 0).astype(int).tolist()
+    hist_len = FORECAST_LEN * 3
+    pred_len = FORECAST_LEN
+    model = ForecastingModel(hist_len, pred_len, prod_num_embeddings)
     bind_model(model, device)
 
     # DONOTCHANGE: They are reserved for nsml
@@ -106,18 +97,64 @@ def main():
         usecols=USECOLS, dtype=int
     ).values
 
-    logging.info('Loading data is finished!')
+    # Train
+    logging.info('Train model...')
+    batch_size = 1024
+    max_iter = 10000
+    lr = 1e-3
+    t_len, n_prod = order_hists.shape
 
-    # Make model
-    num_weeks = 3
-    level_trend = 1.1
-    model = SimpleBaseline(num_weeks, level_trend)
-    model.train(order_hists, price_hists, prod_feat)  # fake train
+    model.train()
+    optim = torch.optim.Adam(model.parameters(), lr=lr)
+    for n_iter in range(1, max_iter+1):
+        # Sample data
+        t_sample = np.random.randint(hist_len, t_len-pred_len)
+        nonzero_cnts = np.asarray((order_hists[t_sample:t_sample+pred_len] > 0).sum(0))[0]
+        sample_prob = nonzero_cnts / np.sum(nonzero_cnts)
+        p_sample = np.random.choice(range(n_prod), batch_size, p=sample_prob)
+        order_hist_sample = order_hists[:, p_sample]
+        price_hist_sample = price_hists[:, p_sample]
 
-    # Save and load test
-    nsml.save('null')
-    nsml.load('null')
+        # Convert to Tensor
+        prod_feat_sample = torch.tensor(prod_feat[p_sample], dtype=torch.long)
+        train_order_hist = csr_to_tensor(order_hist_sample[t_sample-hist_len:t_sample], device)
+        train_price_hist = csr_to_tensor(price_hist_sample[t_sample-hist_len:t_sample], device)
+        test_order_hist = csr_to_tensor(order_hist_sample[t_sample:t_sample+pred_len], device)
+        test_price_hist = csr_to_tensor(price_hist_sample[t_sample:t_sample+pred_len], device)
+
+        # Optimize
+        optim.zero_grad()
+        out = model(train_order_hist, train_price_hist, test_price_hist, prod_feat_sample)
+        err = out - test_order_hist
+        denom = 1 + test_order_hist.to_dense().mean(1, keepdim=True)
+        loss = torch.mean((err / denom)**2)
+        loss.backward()
+        optim.step()
+
+        # Report evaluation metrics
+        mae = torch.mean(torch.abs(out - test_order_hist))
+        wape = torch.mean(torch.abs(out - test_order_hist) / test_order_hist.to_dense().mean(1, keepdim=True))
+        results = {f'loss': loss.item(), 'mae': mae.item(), 'wape': wape.item()}
+        nsml.report(summary=True, scope=locals(), step=n_iter, **results)
+
+        # Save
+        if n_iter % 1000 == 0:
+            print(f'Save n_iter = {n_iter}')
+            nsml.save(n_iter)
+
+    # Load test (Check if load method works well)
+    nsml.load(n_iter)
     logging.info('Save & Load test succeed!')
+
+
+def csr_to_tensor(csr, device):
+    coo = csr.tocoo(copy=False)
+    values = coo.data
+    indices = np.vstack((coo.col, coo.row))  # transpose
+    i = torch.tensor(indices, dtype=torch.long, device=device)
+    v = torch.tensor(values, dtype=torch.float32, device=device)
+    shape = coo.shape[1], coo.shape[0]  # transpose
+    return torch.sparse.FloatTensor(i, v, torch.Size(shape))
 
 
 if __name__ == '__main__':
