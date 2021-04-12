@@ -20,7 +20,6 @@
  
 - 데이터 로드 예제 (main.py 참조)
     ```
-    USECOLS = ['npay_mrc_id', 'prod_catg_1depth_id', 'prod_catg_2depth_id', 'prod_catg_3depth_id', 'prod_catg_4depth_id']
     train_dataset_path = os.path.join(nsml.DATASET_PATH, 'train', 'train_data')
     order_hists = sp.load_npz(os.path.join(train_dataset_path, 'order_hist.npz'))
     price_hists = sp.load_npz(os.path.join(train_dataset_path, 'price_hist.npz'))
@@ -46,8 +45,9 @@
 - infer() 함수는 주어진 input 4개를 활용하여 np.array [500, 7] 형태의 예측치를 return해야 합니다.
 
 ## 베이스라인
-- (지난 num_weeks 주간의 평균) * level_trend 를 예측으로 사용합니다.
-- main.py를 참조해주세요.
+- NSML 사용에 참고가 되길 바라며 PyTorch 기반으로 모델을 만들어서 제공드렸습니다.
+- 모델 튜닝 및 데이터로더 최적화 등이 되어 있지는 않으니, 각자 모델에 맞게 수정하시길 권장합니다.
+- 자세한 내용은 main.py를 참조해주세요.
 
 ## 평가
 - 평가는 [WAPE](https://www.baeldung.com/cs/mape-vs-wape-vs-wmape)를 사용합니다
