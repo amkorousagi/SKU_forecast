@@ -81,3 +81,6 @@
 
 - Q. 학습 데이터에 사용된 상품 피쳐별 카테고리id는 테스트 데이터에서 유지되나요?
   - A. 네.
+
+## Questions
+박영진: young.j.park@navercorp.com
