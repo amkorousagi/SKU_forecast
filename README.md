@@ -50,8 +50,14 @@
 - 자세한 내용은 main.py를 참조해주세요.
 
 ## 평가
-- 평가는 [WAPE](https://www.baeldung.com/cs/mape-vs-wape-vs-wmape)를 사용합니다
-- 12개 테스트 데이터섯 각각에 대해 WAPE를 계산하고, 이에 대한 평균값을 최종 평가로 사용합니다.
+- 평가 metric은 다음과 같습니다.
+  ```
+  def evaluate(prediction, ground_truth):
+      num = np.abs(prediction - ground_truth)
+      denom = np.median(ground_truth, axis=1, keepdims=True)
+      return np.mean(num / denom)
+  ```
+- 12개 테스트 데이터섯 각각에 대해 score를 계산하고, 이에 대한 평균값을 최종 평가로 사용합니다.
 
 ## 예상 질문
 - Q. 테스트데이터는 학습데이터에 포함되어 있나요?
