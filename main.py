@@ -9,6 +9,9 @@ import pandas as pd
 import scipy.sparse as sp
 import nsml
 
+from torch.autograd import Variable
+import matplotlib.pyplot as plt
+
 from model import ForecastingModel
 from config import FORECAST_LEN, USECOLS
 
@@ -44,9 +47,10 @@ def bind_model(model, device):
         train_order_hist = torch.tensor(train_order_hist[-hist_len:].T, dtype=torch.float32, device=device)
         train_price_hist = torch.tensor(train_price_hist[-hist_len:].T, dtype=torch.float32, device=device)
         test_price_hist = torch.tensor(test_price_hist.T, dtype=torch.float32, device=device)
-        prod_feat = torch.tensor(prod_feat, dtype=torch.long, device=device)
+        prod_feat = torch.tensor(prod_feat, dtype=torch.float32, device=device)
 
         prediction_tensor = model(train_order_hist, train_price_hist, test_price_hist, prod_feat)
+        prediction_tensor = torch.max(prediction_tensor ,torch.tensor([0.]))
         infer_result = prediction_tensor.detach().cpu().numpy().T
         return infer_result
 
@@ -76,12 +80,13 @@ def main():
 
     # Build and bind model
     logging.info('Build model...')
+    # embedding inner nodes
     prod_num_embeddings = [215, 49, 393, 2058, 2504]  # np.max(prod_feat, 0).astype(int).tolist()
-    hist_len = FORECAST_LEN * 3
+    hist_len = FORECAST_LEN * 52
     pred_len = FORECAST_LEN
     model = ForecastingModel(hist_len, pred_len, prod_num_embeddings)
     bind_model(model, device)
-
+    print(model)
     # DONOTCHANGE: They are reserved for nsml
     # Warning: Do not load data before the following code!
     if config.pause:
@@ -96,11 +101,27 @@ def main():
         os.path.join(train_dataset_path, 'prod_feat.csv'),
         usecols=USECOLS, dtype=int
     ).values
+    # print("original")
+    # print(prod_feat)
+    # print(torch.max(a,torch.tensor([0.]),keepdim=True))
+    
+
+    # scatter
+    '''
+    plt.figure(figsize=(10,4))
+    x = Variable(csr_to_tensor(price_hists[:,0], device).to_dense())
+    y = Variable(csr_to_tensor(order_hists[:,0], device).to_dense())
+    plt.scatter(x.data.numpy(), y.data.numpy(), color = "orange")
+    plt.title('Regression Analysis')
+    plt.xlabel('Independent varible')
+    plt.ylabel('Dependent varible')
+    plt.show()
+    '''
 
     # Train
     logging.info('Train model...')
-    batch_size = 1024
-    max_iter = 10000
+    batch_size = 1024 * 8
+    max_iter = 100000
     lr = 1e-3
     t_len, n_prod = order_hists.shape
 
@@ -116,7 +137,7 @@ def main():
         price_hist_sample = price_hists[:, p_sample]
 
         # Convert to Tensor
-        prod_feat_sample = torch.tensor(prod_feat[p_sample], dtype=torch.long)
+        prod_feat_sample = torch.tensor(prod_feat[p_sample], dtype=torch.float32)
         train_order_hist = csr_to_tensor(order_hist_sample[t_sample-hist_len:t_sample], device)
         train_price_hist = csr_to_tensor(price_hist_sample[t_sample-hist_len:t_sample], device)
         test_order_hist = csr_to_tensor(order_hist_sample[t_sample:t_sample+pred_len], device)
@@ -132,13 +153,21 @@ def main():
         optim.step()
 
         # Report evaluation metrics
+        # print(test_order_hist.to_dense().median(1, keepdim=True))
         mae = torch.mean(torch.abs(out - test_order_hist))
+        # print(mae)
+        # my_mae = torch.mean(torch.abs(torch.max(out,torch.tensor([0.])) - test_order_hist))
+        # print(my_mae)
+
         wape = torch.mean(torch.abs(out - test_order_hist) / test_order_hist.to_dense().mean(1, keepdim=True))
+        # score = torch.mean(torch.abs(out - test_order_hist) / test_order_hist.to_dense().median(1, keepdim=True).values)
+        # print(score)
+        # print(score.item())
         results = {f'loss': loss.item(), 'mae': mae.item(), 'wape': wape.item()}
         nsml.report(summary=True, scope=locals(), step=n_iter, **results)
 
         # Save
-        if n_iter % 1000 == 0:
+        if n_iter % 5 == 0:
             print(f'Save n_iter = {n_iter}')
             nsml.save(n_iter)
 
